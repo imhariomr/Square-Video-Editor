@@ -24,7 +24,10 @@ from flask import (
     Flask, render_template, request, jsonify, send_file, abort
 )
 
-from video_utils import probe_video, run_export, remux_faststart, VideoProbeError, ExportError
+from video_utils import (
+    probe_video, run_export, remux_faststart, VideoProbeError, ExportError,
+    FFMPEG_PATH, FFPROBE_PATH,
+)
 from text_render import (
     render_band_image, render_overlay_image, render_watermark_image,
     MIN_FONT_SIZE, MAX_FONT_SIZE,
@@ -121,6 +124,19 @@ def index():
         min_font_size=MIN_FONT_SIZE,
         max_font_size=MAX_FONT_SIZE,
     )
+
+
+@app.route("/health")
+def health():
+    """Lightweight liveness/readiness check — no subprocess calls, no disk
+    I/O, just reports whether the server is up and whether it actually
+    found a usable ffmpeg/ffprobe at startup. Safe to point a host's health
+    check (e.g. Render) or an uptime monitor at this."""
+    return jsonify({
+        "status": "ok",
+        "ffmpeg_available": bool(FFMPEG_PATH),
+        "ffprobe_available": bool(FFPROBE_PATH),
+    })
 
 
 @app.route("/api/upload", methods=["POST"])

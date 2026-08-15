@@ -46,6 +46,9 @@ Then open http://127.0.0.1:5050 in your browser.
 - Minimum clip length is 0.3s; maximum caption length is 300 characters;
   max upload size is 1GB. These are easy to change at the top of `app.py`.
 - Supported input formats: MP4, MOV, M4V, WEBM, MKV, AVI.
+- `GET /health` returns `{"status": "ok", "ffmpeg_available": ..., "ffprobe_available": ...}` —
+  a lightweight check with no disk I/O, safe for a host's health check or
+  an uptime monitor (already wired into `render.yaml` via `healthCheckPath`).
 - Trim inputs accept either plain seconds ("71.2") or m:ss / h:mm:ss
   ("1:11.2"). Whenever Start is changed (typed, dragged, or slider), End
   automatically follows to a fixed clip length (`AUTO_CLIP_LENGTH` in
@@ -108,4 +111,3 @@ it'll build/run that file instead of `render.yaml`'s
 buildCommand/startCommand — same behavior, no code changes needed either
 way since `video_utils.py` always prefers a real system ffmpeg/ffprobe
 when present.
-"# Square-Video-Editor" 
