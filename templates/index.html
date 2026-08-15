@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Square Video Editor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version('style.css') }}">
+</head>
+<body>
+  <div class="app" data-canvas="{{ canvas }}" data-max-text="{{ max_text_length }}"
+       data-min-font="{{ min_font_size }}" data-max-font="{{ max_font_size }}">
+
+    <header class="topbar">
+      <h1>Square Video Editor</h1>
+      <p class="tagline">Trim, crop to 1:1 and burn in a caption &mdash; exported as a real, independently-playable MP4.</p>
+    </header>
+
+    <!-- ============ UPLOAD ZONE (shown until a video is loaded) ============ -->
+    <section class="upload-zone" data-upload-zone>
+      <div class="upload-box" data-dropzone tabindex="0" role="button" aria-label="Upload a video">
+        <div class="upload-icon" aria-hidden="true">&#8613;</div>
+        <p class="upload-title">Drag &amp; drop a video here</p>
+        <p class="upload-sub">or click to browse &mdash; MP4, MOV, WEBM, MKV, AVI, M4V (max 1GB)</p>
+        <input type="file" accept="video/*" data-file-input hidden>
+      </div>
+      <p class="upload-error" data-upload-error></p>
+    </section>
+
+    <!-- ============ EDITOR (hidden until a video is loaded) ============ -->
+    <section class="editor" data-editor hidden>
+
+      <div class="current-file-bar">
+        <div class="current-file-info">
+          <span class="file-dot" aria-hidden="true"></span>
+          <span data-current-filename>video.mp4</span>
+          <span class="file-meta" data-current-meta>0:00 &middot; 0x0</span>
+        </div>
+        <div class="current-file-actions">
+          <button type="button" class="btn btn-ghost" data-replace-btn>Replace</button>
+          <button type="button" class="btn btn-ghost btn-danger" data-remove-btn>Remove</button>
+        </div>
+      </div>
+
+      <div class="editor-grid">
+
+        <!-- LEFT: preview + playback + timeline -->
+        <div class="editor-main">
+          <div class="preview-wrap">
+            <div class="preview-canvas" data-preview-canvas>
+              <video data-preview-video playsinline preload="metadata"></video>
+              <div class="text-band" data-text-band hidden></div>
+              <div class="text-overlay-box" data-text-overlay hidden></div>
+              <div class="watermark-badge" data-watermark>dumbestposting</div>
+            </div>
+          </div>
+
+          <div class="playback-controls">
+            <button type="button" class="btn btn-icon" data-playpause-btn title="Play" aria-label="Play">&#9654;</button>
+            <button type="button" class="btn btn-icon" data-restart-btn title="Restart">&#8634;</button>
+            <span class="playback-time" data-playback-time>0:00 / 0:00</span>
+          </div>
+
+          <div class="timeline" data-timeline>
+            <div class="timeline-labels">
+              <span>Start: <strong data-label-start>0:00</strong></span>
+              <span>Duration: <strong data-label-duration>0:00</strong></span>
+              <span>End: <strong data-label-end>0:00</strong></span>
+            </div>
+            <div class="timeline-track" data-timeline-track>
+              <div class="timeline-range" data-timeline-range></div>
+              <div class="timeline-playhead" data-timeline-playhead></div>
+              <div class="timeline-handle timeline-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="Clip start"></div>
+              <div class="timeline-handle timeline-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="Clip end"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: settings -->
+        <div class="editor-settings">
+
+          <div class="panel">
+            <h2>Trim</h2>
+            <div class="field-row">
+              <label class="field">
+                <span>Start (m:ss)</span>
+                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-start-input>
+              </label>
+              <label class="field">
+                <span>End (m:ss)</span>
+                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-end-input>
+              </label>
+            </div>
+            <label class="field-full">
+              <span>Start</span>
+              <input type="range" step="0.01" min="0" max="0" value="0" data-start-slider>
+            </label>
+            <label class="field-full">
+              <span>End</span>
+              <input type="range" step="0.01" min="0" max="0" value="0" data-end-slider>
+            </label>
+            <p class="hint" data-trim-error></p>
+          </div>
+
+          <div class="panel">
+            <h2>Text overlay</h2>
+            <label class="field-full">
+              <span>Caption text</span>
+              <textarea rows="3" maxlength="{{ max_text_length }}" placeholder="Add a caption&hellip;" data-text-input></textarea>
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Font size</span>
+                <input type="range" min="{{ min_font_size }}" max="{{ max_font_size }}" value="44" data-font-size-slider>
+              </label>
+              <span class="font-size-readout" data-font-size-readout>44px</span>
+            </div>
+
+            <div class="field-row toggles">
+              <button type="button" class="btn btn-toggle is-active" data-bold-toggle title="Bold"><strong>B</strong></button>
+
+              <div class="segmented" data-align-group>
+                <button type="button" class="segmented-btn" data-align="left" title="Align left">&#8676;</button>
+                <button type="button" class="segmented-btn is-active" data-align="center" title="Align center">&#8596;</button>
+                <button type="button" class="segmented-btn" data-align="right" title="Align right">&#8677;</button>
+              </div>
+            </div>
+
+            <div class="field-row">
+              <label class="field">
+                <span>Style</span>
+                <select data-style-select>
+                  <option value="band" selected>Black band</option>
+                  <option value="overlay">Floating box</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Position</span>
+                <select data-position-select>
+                  <option value="top" selected>Top</option>
+                  <option value="center">Center</option>
+                  <option value="bottom">Bottom</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ============ EXPORT BAR ============ -->
+      <div class="export-bar">
+        <div class="export-bar-main">
+          <button type="button" class="btn btn-primary" data-export-btn>Export square video</button>
+          <div class="export-progress" data-export-progress hidden>
+            <div class="export-progress-track">
+              <div class="export-progress-fill" data-export-progress-fill></div>
+            </div>
+            <span class="export-progress-label" data-export-progress-label>Preparing video&hellip;</span>
+          </div>
+          <p class="export-error" data-export-error></p>
+        </div>
+        <div class="export-result" data-export-result hidden>
+          <span>&#10003; Export complete</span>
+          <a class="btn btn-primary" data-download-link href="#" download>Download video</a>
+          <button type="button" class="btn btn-ghost" data-export-again-btn>Export again</button>
+        </div>
+      </div>
+
+    </section>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version('app.js') }}"></script>
+</body>
+</html>

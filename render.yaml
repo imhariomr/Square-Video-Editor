@@ -1,0 +1,21 @@
+# Render "Blueprint" — lets you deploy with one click via
+# Render Dashboard → New → Blueprint, pointing at this repo. Render reads
+# this file and creates/configures the web service automatically instead
+# of you filling in Build/Start Command by hand.
+#
+# This uses Render's native Python runtime (no Dockerfile needed) — ffmpeg
+# comes from the `imageio-ffmpeg` package in requirements.txt (a bundled
+# static binary), and video_utils.py already falls back to parsing
+# `ffmpeg -i` output when ffprobe itself isn't installed. See README.md's
+# "Deploying to Render" section for the Docker-based alternative if you'd
+# rather use real system ffmpeg/ffprobe.
+services:
+  - type: web
+    name: square-video-editor
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
