@@ -3,16 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Square Video Editor</title>
+<title>Video Editor</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version('style.css') }}">
 </head>
 <body>
-  <div class="app" data-canvas="{{ canvas }}" data-max-text="{{ max_text_length }}"
+  <div class="app" data-aspect-ratios='{{ aspect_ratios | tojson }}' data-default-aspect="{{ default_aspect_ratio }}"
+       data-max-text="{{ max_text_length }}"
        data-min-font="{{ min_font_size }}" data-max-font="{{ max_font_size }}">
 
     <header class="topbar">
-      <h1>Square Video Editor</h1>
-      <p class="tagline">Trim, crop to 1:1 and burn in a caption &mdash; exported as a real, independently-playable MP4.</p>
+      <div class="topbar-text">
+        <h1>Video Editor</h1>
+        <p class="tagline">Trim, crop and burn in a caption &mdash; exported as a real, independently-playable MP4.</p>
+      </div>
     </header>
 
     <!-- ============ UPLOAD ZONE (shown until a video is loaded) ============ -->
@@ -20,7 +23,7 @@
       <div class="upload-box" data-dropzone tabindex="0" role="button" aria-label="Upload a video">
         <div class="upload-icon" aria-hidden="true">&#8613;</div>
         <p class="upload-title">Drag &amp; drop a video here</p>
-        <p class="upload-sub">or click to browse &mdash; MP4, MOV, WEBM, MKV, AVI, M4V (max 1GB)</p>
+        <p class="upload-sub">or click to browse &mdash; MP4, MOV, WEBM, MKV, AVI, M4V (max 8GB)</p>
         <input type="file" accept="video/*" data-file-input hidden>
       </div>
       <p class="upload-error" data-upload-error></p>
@@ -45,60 +48,36 @@
 
         <!-- LEFT: preview + playback + timeline -->
         <div class="editor-main">
-          <div class="preview-wrap">
-            <div class="preview-canvas" data-preview-canvas>
-              <video data-preview-video playsinline preload="metadata"></video>
-              <div class="text-band" data-text-band hidden></div>
-              <div class="text-overlay-box" data-text-overlay hidden></div>
-              <div class="watermark-badge" data-watermark>dumbestposting</div>
+          <div class="preview-card">
+            <div class="preview-wrap">
+              <div class="preview-canvas" data-preview-canvas>
+                <video data-preview-video playsinline preload="metadata"></video>
+                <div class="text-band" data-text-band hidden></div>
+                <div class="text-overlay-box" data-text-overlay hidden></div>
+                <div class="watermark-badge" data-watermark hidden></div>
+                <div class="subtitle-preview" data-subtitle-preview hidden></div>
+              </div>
             </div>
-          </div>
 
-          <div class="playback-controls">
-            <button type="button" class="btn btn-icon" data-playpause-btn title="Play" aria-label="Play">&#9654;</button>
-            <button type="button" class="btn btn-icon" data-restart-btn title="Restart">&#8634;</button>
-            <span class="playback-time" data-playback-time>0:00 / 0:00</span>
-          </div>
-
-          <div class="timeline" data-timeline>
-            <div class="timeline-labels">
-              <span>Start: <strong data-label-start>0:00</strong></span>
-              <span>Duration: <strong data-label-duration>0:00</strong></span>
-              <span>End: <strong data-label-end>0:00</strong></span>
+            <div class="playback-controls">
+              <button type="button" class="btn btn-icon" data-playpause-btn title="Play" aria-label="Play">&#9654;</button>
+              <button type="button" class="btn btn-icon" data-restart-btn title="Restart">&#8634;</button>
+              <span class="playback-time" data-playback-time>0:00 / 0:00</span>
             </div>
-            <div class="timeline-track" data-timeline-track>
-              <div class="timeline-range" data-timeline-range></div>
-              <div class="timeline-playhead" data-timeline-playhead></div>
-              <div class="timeline-handle timeline-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="Clip start"></div>
-              <div class="timeline-handle timeline-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="Clip end"></div>
-            </div>
-          </div>
-        </div>
 
-        <!-- RIGHT: settings -->
-        <div class="editor-settings">
-
-          <div class="panel">
-            <h2>Trim</h2>
-            <div class="field-row">
-              <label class="field">
-                <span>Start (m:ss)</span>
-                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-start-input>
-              </label>
-              <label class="field">
-                <span>End (m:ss)</span>
-                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-end-input>
-              </label>
+            <div class="timeline" data-timeline>
+              <div class="timeline-labels">
+                <span class="timeline-label timeline-label-start">Start: <strong data-label-start>0:00</strong></span>
+                <span class="timeline-label timeline-label-duration">Duration: <strong data-label-duration>0:00</strong></span>
+                <span class="timeline-label timeline-label-end">End: <strong data-label-end>0:00</strong></span>
+              </div>
+              <div class="timeline-track" data-timeline-track>
+                <div class="timeline-range" data-timeline-range></div>
+                <div class="timeline-playhead" data-timeline-playhead></div>
+                <div class="timeline-handle timeline-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="Clip start"></div>
+                <div class="timeline-handle timeline-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="Clip end"></div>
+              </div>
             </div>
-            <label class="field-full">
-              <span>Start</span>
-              <input type="range" step="0.01" min="0" max="0" value="0" data-start-slider>
-            </label>
-            <label class="field-full">
-              <span>End</span>
-              <input type="range" step="0.01" min="0" max="0" value="0" data-end-slider>
-            </label>
-            <p class="hint" data-trim-error></p>
           </div>
 
           <div class="panel">
@@ -144,13 +123,132 @@
             </div>
           </div>
 
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Subtitles</h2>
+              <label class="preset-picker">
+                <span>Presets</span>
+                <select data-subtitle-preset>
+                  <option value="none" selected>None</option>
+                  <option value="yellow">Yellow</option>
+                </select>
+              </label>
+            </div>
+            <label class="field-checkbox">
+              <input type="checkbox" data-subtitles-toggle>
+              <span>Auto-generate subtitles</span>
+            </label>
+            <p class="hint hint-neutral" data-subtitles-status></p>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: settings -->
+        <div class="editor-settings">
+
+          <div class="panel">
+            <h2>Format</h2>
+            <label class="field-full">
+              <span>Aspect ratio</span>
+              <select data-aspect-select class="select-lg">
+                {% for key in aspect_ratios %}
+                <option value="{{ key }}" {% if key == default_aspect_ratio %}selected{% endif %}>{{ key }}{% if key == "1:1" %} &middot; Square (recommended){% endif %}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+
+          <div class="panel">
+            <h2>Trim</h2>
+            <div class="field-row">
+              <label class="field">
+                <span>Start (m:ss)</span>
+                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-start-input>
+              </label>
+              <label class="field">
+                <span>End (m:ss)</span>
+                <input type="text" inputmode="numeric" placeholder="0:00" autocomplete="off" data-end-input>
+              </label>
+            </div>
+            <label class="field-full">
+              <span>Start</span>
+              <input type="range" step="0.01" min="0" max="0" value="0" data-start-slider>
+            </label>
+            <label class="field-full">
+              <span>End</span>
+              <input type="range" step="0.01" min="0" max="0" value="0" data-end-slider>
+            </label>
+            <p class="hint" data-trim-error></p>
+          </div>
+
+          <div class="panel">
+            <h2>Watermark</h2>
+            <label class="field-checkbox">
+              <input type="checkbox" data-watermark-toggle>
+              <span>Add watermark</span>
+            </label>
+            <label class="field-full" data-watermark-field hidden>
+              <span>Watermark text</span>
+              <input type="text" maxlength="{{ watermark_max_length }}" placeholder="e.g. @yourhandle" autocomplete="off" data-watermark-input>
+            </label>
+          </div>
+
+          <div class="panel">
+            <h2>Filter</h2>
+            <label class="field-full">
+              <span>Choose a filter</span>
+              <select data-filter-select>
+                <option value="" selected disabled>Select a filter&hellip;</option>
+                <option value="movie_cut">Movie Cut</option>
+              </select>
+            </label>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ============ MOVIE CUT MODAL ============ -->
+      <div class="modal-overlay" data-moviecut-modal hidden>
+        <div class="modal">
+          <div data-moviecut-view-config>
+            <h3>Movie Cut</h3>
+            <label class="field-full">
+              <span>Duration of clips (minutes)</span>
+              <input type="number" min="0.1" step="0.1" value="1" data-moviecut-duration>
+            </label>
+            <p class="modal-text">Are you sure you want to apply this filter?</p>
+            <p class="hint" data-moviecut-error></p>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" data-moviecut-no>No</button>
+              <button type="button" class="btn btn-primary" data-moviecut-yes>Yes</button>
+            </div>
+          </div>
+
+          <div data-moviecut-view-progress hidden>
+            <h3>Cutting your movie&hellip;</h3>
+            <div class="export-progress modal-progress">
+              <div class="export-progress-track">
+                <div class="export-progress-fill" data-moviecut-progress-fill></div>
+              </div>
+              <span class="export-progress-label" data-moviecut-progress-label>Preparing clips&hellip;</span>
+            </div>
+          </div>
+
+          <div data-moviecut-view-ready hidden>
+            <h3>Your Zip File is ready</h3>
+            <p class="modal-text">All clips have been cut and packaged into one zip file.</p>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" data-moviecut-cancel>Cancel</button>
+              <a class="btn btn-primary" data-moviecut-download href="#" download>Download</a>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- ============ EXPORT BAR ============ -->
       <div class="export-bar">
         <div class="export-bar-main">
-          <button type="button" class="btn btn-primary" data-export-btn>Export square video</button>
+          <button type="button" class="btn btn-primary" data-export-btn>Export video</button>
           <div class="export-progress" data-export-progress hidden>
             <div class="export-progress-track">
               <div class="export-progress-fill" data-export-progress-fill></div>

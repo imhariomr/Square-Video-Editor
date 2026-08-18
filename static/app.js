@@ -19,19 +19,26 @@
   "use strict";
 
   const root = document.querySelector(".app");
-  const CANVAS = parseInt(root.dataset.canvas, 10) || 1080;
+  const ASPECT_RATIOS = JSON.parse(root.dataset.aspectRatios || "{}");
+  const DEFAULT_ASPECT_RATIO = root.dataset.defaultAspect || "1:1";
   const MAX_TEXT_LENGTH = parseInt(root.dataset.maxText, 10) || 300;
   const MIN_FONT = parseInt(root.dataset.minFont, 10) || 18;
   const MAX_FONT = parseInt(root.dataset.maxFont, 10) || 96;
   const MIN_CLIP = 0.3; // keep in sync with app.py's minimum clip length
   const AUTO_CLIP_LENGTH = 29.49; // default clip length auto-applied whenever Start changes
 
-  // Fixed watermark shown in the preview and burned into every export.
-  // Keep these four in sync with WATERMARK_* in app.py so the preview
-  // never shows something different from what actually gets rendered.
+  // Optional watermark shown in the preview and burned into the export when
+  // the user opts in. Keep these three in sync with WATERMARK_* in app.py
+  // so the preview never shows something different from what actually gets
+  // rendered — only the text itself is user-supplied.
   const WATERMARK_FONT_SIZE = 26;
   const WATERMARK_MARGIN = 30;
   const WATERMARK_OPACITY = 0.55;
+
+  // Auto-generated subtitle preview styling — keep in sync with
+  // SUBTITLE_FONT_SIZE / SUBTITLE_MARGIN in app.py.
+  const SUBTITLE_FONT_SIZE = 34;
+  const SUBTITLE_MARGIN = 36;
 
   // ---------------------------------------------------------------------
   // DOM references
@@ -53,6 +60,9 @@
     textBand: document.querySelector("[data-text-band]"),
     textOverlay: document.querySelector("[data-text-overlay]"),
     watermark: document.querySelector("[data-watermark]"),
+    subtitlePreview: document.querySelector("[data-subtitle-preview]"),
+
+    aspectSelect: document.querySelector("[data-aspect-select]"),
 
     playPauseBtn: document.querySelector("[data-playpause-btn]"),
     restartBtn: document.querySelector("[data-restart-btn]"),
@@ -81,6 +91,14 @@
     styleSelect: document.querySelector("[data-style-select]"),
     positionSelect: document.querySelector("[data-position-select]"),
 
+    watermarkToggle: document.querySelector("[data-watermark-toggle]"),
+    watermarkField: document.querySelector("[data-watermark-field]"),
+    watermarkInput: document.querySelector("[data-watermark-input]"),
+
+    subtitlesToggle: document.querySelector("[data-subtitles-toggle]"),
+    subtitlesStatus: document.querySelector("[data-subtitles-status]"),
+    subtitlePresetSelect: document.querySelector("[data-subtitle-preset]"),
+
     exportBtn: document.querySelector("[data-export-btn]"),
     exportProgress: document.querySelector("[data-export-progress]"),
     exportProgressFill: document.querySelector("[data-export-progress-fill]"),
@@ -89,6 +107,20 @@
     exportResult: document.querySelector("[data-export-result]"),
     downloadLink: document.querySelector("[data-download-link]"),
     exportAgainBtn: document.querySelector("[data-export-again-btn]"),
+
+    filterSelect: document.querySelector("[data-filter-select]"),
+    moviecutModal: document.querySelector("[data-moviecut-modal]"),
+    moviecutViewConfig: document.querySelector("[data-moviecut-view-config]"),
+    moviecutViewProgress: document.querySelector("[data-moviecut-view-progress]"),
+    moviecutViewReady: document.querySelector("[data-moviecut-view-ready]"),
+    moviecutDuration: document.querySelector("[data-moviecut-duration]"),
+    moviecutError: document.querySelector("[data-moviecut-error]"),
+    moviecutYes: document.querySelector("[data-moviecut-yes]"),
+    moviecutNo: document.querySelector("[data-moviecut-no]"),
+    moviecutProgressFill: document.querySelector("[data-moviecut-progress-fill]"),
+    moviecutProgressLabel: document.querySelector("[data-moviecut-progress-label]"),
+    moviecutCancel: document.querySelector("[data-moviecut-cancel]"),
+    moviecutDownload: document.querySelector("[data-moviecut-download]"),
   };
 
   // ---------------------------------------------------------------------
@@ -102,6 +134,8 @@
     height: 0,
     hasAudio: false,
 
+    aspectRatio: DEFAULT_ASPECT_RATIO,
+
     start: 0,
     end: 0,
 
@@ -112,6 +146,18 @@
     style: "band", // "band" | "overlay"
     position: "top", // "top" | "center" | "bottom"
 
+    watermarkEnabled: false,
+    watermarkText: "",
+
+    subtitlesEnabled: false,
+    subtitlePreset: "none", // "none" | "yellow"
+    subtitleSegments: [], // [{start, end, text}], clip-relative seconds
+    // Bumped every time a subtitle preview fetch starts. Lets a late-arriving
+    // response from an abandoned fetch (checkbox unchecked, video replaced)
+    // recognize it's stale and skip touching the DOM — same pattern as
+    // exportEpoch below.
+    subtitlesEpoch: 0,
+
     exportJobId: null,
     // Bumped every time an export is (re)started or reset. Each polling
     // loop captures the epoch it was started with and checks it before
@@ -119,6 +165,11 @@
     // new export starts, mid-poll, an old/abandoned loop's late-arriving
     // response can never be mistaken for the current export's completion.
     exportEpoch: 0,
+
+    // Bumped whenever the Movie Cut modal is closed or a new cut is
+    // started — same stale-response guard as exportEpoch, for the
+    // separate movie-cut polling loop.
+    moviecutEpoch: 0,
   };
 
   // ---------------------------------------------------------------------
@@ -159,6 +210,21 @@
     const v = parseFloat(str);
     return isNaN(v) ? NaN : v;
   }
+
+  function canvasDims() {
+    return ASPECT_RATIOS[state.aspectRatio] || [1080, 1080];
+  }
+
+  function applyAspectRatio() {
+    const [w, h] = canvasDims();
+    dom.previewCanvas.style.aspectRatio = `${w} / ${h}`;
+    renderPreviewLayout();
+  }
+
+  dom.aspectSelect.addEventListener("change", () => {
+    state.aspectRatio = dom.aspectSelect.value;
+    applyAspectRatio();
+  });
 
   function resetEditorInputs() {
     dom.uploadError.textContent = "";
@@ -253,6 +319,8 @@
       state.hasAudio ? "" : " · no audio"
     }`;
 
+    resetSubtitlesUI();
+
     dom.previewVideo.src = `/media/${state.videoId}`;
 
     dom.startSlider.min = "0";
@@ -262,7 +330,7 @@
 
     syncTrimInputs();
     renderTimeline();
-    renderPreviewLayout();
+    applyAspectRatio();
     updatePlaybackTimeLabel();
   }
 
@@ -274,6 +342,7 @@
     dom.editor.hidden = true;
     dom.uploadZone.hidden = false;
     resetExportUI();
+    resetSubtitlesUI();
   }
 
   // ---------------------------------------------------------------------
@@ -296,6 +365,7 @@
     validateTrim();
     syncTrimInputs();
     renderTimeline();
+    invalidateSubtitlePreview();
     if (!fromDrag) seekPreviewToStart();
   }
 
@@ -307,6 +377,7 @@
     validateTrim();
     syncTrimInputs();
     renderTimeline();
+    invalidateSubtitlePreview();
   }
 
   function validateTrim() {
@@ -442,15 +513,115 @@
   });
 
   // ---------------------------------------------------------------------
+  // Watermark controls — hidden text input only appears once the checkbox
+  // is checked; whatever the user types there is the watermark, there is
+  // no built-in default.
+  // ---------------------------------------------------------------------
+  dom.watermarkToggle.addEventListener("change", () => {
+    state.watermarkEnabled = dom.watermarkToggle.checked;
+    dom.watermarkField.hidden = !state.watermarkEnabled;
+    renderPreviewLayout();
+  });
+  dom.watermarkInput.addEventListener("input", () => {
+    state.watermarkText = dom.watermarkInput.value;
+    renderPreviewLayout();
+  });
+
+  // ---------------------------------------------------------------------
+  // Subtitles — checking the box transcribes the current trim range on the
+  // server (faster-whisper) and previews the resulting lines timed over the
+  // video. Export re-transcribes with whatever the trim range is at that
+  // point, so the preview is just a preview — it never has to be perfectly
+  // in sync with a trim change made after it was generated.
+  // ---------------------------------------------------------------------
+  function resetSubtitlesUI() {
+    state.subtitlesEpoch += 1; // invalidate any in-flight preview fetch
+    state.subtitlesEnabled = false;
+    state.subtitleSegments = [];
+    dom.subtitlesToggle.checked = false;
+    dom.subtitlesToggle.disabled = !state.hasAudio;
+    dom.subtitlesStatus.textContent = state.hasAudio ? "" : "No audio track detected.";
+    dom.subtitlePreview.hidden = true;
+  }
+
+  function invalidateSubtitlePreview() {
+    if (!state.subtitleSegments.length) return;
+    state.subtitlesEpoch += 1;
+    state.subtitleSegments = [];
+    dom.subtitlePreview.hidden = true;
+    if (state.subtitlesEnabled) {
+      dom.subtitlesStatus.textContent = "Trim changed — export will regenerate subtitles for the new range.";
+    }
+  }
+
+  async function generateSubtitlesPreview() {
+    state.subtitlesEpoch += 1;
+    const myEpoch = state.subtitlesEpoch;
+    state.subtitleSegments = [];
+    dom.subtitlePreview.hidden = true;
+    dom.subtitlesStatus.textContent = "Generating subtitles…";
+
+    try {
+      const res = await fetch("/api/subtitles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_id: state.videoId, start: state.start, end: state.end }),
+      });
+      const data = await res.json();
+      if (myEpoch !== state.subtitlesEpoch) return; // superseded — checkbox toggled off, trim changed, etc.
+      if (!res.ok) {
+        dom.subtitlesStatus.textContent = data.error || "Could not generate subtitles.";
+        return;
+      }
+      state.subtitleSegments = data.segments || [];
+      dom.subtitlesStatus.textContent = state.subtitleSegments.length
+        ? `Ready — ${state.subtitleSegments.length} line(s) previewed below.`
+        : "No speech detected in this clip.";
+    } catch (err) {
+      if (myEpoch !== state.subtitlesEpoch) return;
+      console.error("[editor] subtitle generation failed:", err);
+      dom.subtitlesStatus.textContent = "Could not reach the server — check your connection and try again.";
+    }
+  }
+
+  dom.subtitlesToggle.addEventListener("change", () => {
+    state.subtitlesEnabled = dom.subtitlesToggle.checked;
+    if (!state.subtitlesEnabled) {
+      // Unchecking never clears the cache — re-checking reuses the same
+      // segments unless the trim range changed (which already invalidates
+      // them) or a different video was loaded.
+      state.subtitlesEpoch += 1;
+      dom.subtitlePreview.hidden = true;
+      dom.subtitlesStatus.textContent = "";
+      return;
+    }
+    if (state.subtitleSegments.length) {
+      dom.subtitlesStatus.textContent = `Ready — ${state.subtitleSegments.length} line(s) previewed below.`;
+    } else {
+      generateSubtitlesPreview();
+    }
+  });
+
+  dom.subtitlePresetSelect.addEventListener("change", () => {
+    // A style-only choice — never touches the generated text/timing, so no
+    // need to regenerate anything here.
+    state.subtitlePreset = dom.subtitlePresetSelect.value;
+    dom.subtitlePreview.classList.toggle("preset-yellow", state.subtitlePreset === "yellow");
+  });
+
+  // ---------------------------------------------------------------------
   // Live preview layout — a CSS approximation of the server's compositing:
-  // scale the preview canvas's pixel budget (CANVAS x CANVAS) down to
-  // whatever the on-screen box actually measures, then position the video
+  // scale the preview canvas's pixel budget (the selected aspect ratio's
+  // canvas_w x canvas_h) down to whatever the on-screen box actually
+  // measures, then position the video
   // and the text layer using the exact same relative font size / padding /
   // alignment the export will use.
   // ---------------------------------------------------------------------
   function renderPreviewLayout() {
+    const [canvasW] = canvasDims();
     const boxWidth = dom.previewCanvas.clientWidth || 460;
-    const scale = boxWidth / CANVAS;
+    const boxHeight = dom.previewCanvas.clientHeight || boxWidth;
+    const scale = boxWidth / canvasW;
 
     dom.textBand.hidden = true;
     dom.textOverlay.hidden = true;
@@ -459,7 +630,7 @@
     // caption box is anchored to the bottom — where that box begins, so the
     // watermark (positioned below) can avoid both, mirroring the server's
     // compositing logic in _run_export_job exactly.
-    let videoAreaBottomPx = boxWidth;
+    let videoAreaBottomPx = boxHeight;
     let captionTopPx = null;
 
     if (!state.text.trim()) {
@@ -475,13 +646,13 @@
       // Let the browser wrap naturally, then measure how tall the band
       // actually rendered so the video can fill exactly the rest.
       const bandHeight = band.getBoundingClientRect().height;
-      const videoHeight = boxWidth - bandHeight;
+      const videoHeight = boxHeight - bandHeight;
       if (state.position === "bottom") {
         dom.previewVideo.style.top = "0px";
         videoAreaBottomPx = videoHeight;
       } else {
         dom.previewVideo.style.top = `${bandHeight}px`;
-        videoAreaBottomPx = boxWidth;
+        videoAreaBottomPx = boxHeight;
       }
       dom.previewVideo.style.height = `${Math.max(0, videoHeight)}px`;
     } else {
@@ -494,31 +665,68 @@
       box.style.borderRadius = `${18 * scale}px`;
 
       const margin = 40 * scale;
-      const boxHeight = box.getBoundingClientRect().height;
+      const overlayH = box.getBoundingClientRect().height;
       if (state.position === "top") {
         box.style.top = `${margin}px`;
         box.style.bottom = "";
       } else if (state.position === "bottom") {
         box.style.top = "";
         box.style.bottom = `${margin}px`;
-        captionTopPx = boxWidth - margin - boxHeight;
+        captionTopPx = boxHeight - margin - overlayH;
       } else {
-        box.style.top = `calc(50% - ${boxHeight / 2}px)`;
+        box.style.top = `calc(50% - ${overlayH / 2}px)`;
         box.style.bottom = "";
       }
     }
 
-    renderWatermark(scale, captionTopPx !== null ? captionTopPx : videoAreaBottomPx);
+    renderWatermark(scale, captionTopPx !== null ? captionTopPx : videoAreaBottomPx, boxHeight);
   }
 
-  function renderWatermark(scale, bottomLimitPx) {
+  function renderWatermark(scale, bottomLimitPx, boxHeight) {
     const wm = dom.watermark;
-    wm.style.fontSize = `${WATERMARK_FONT_SIZE * scale}px`;
-    wm.style.textShadow = `0 ${scale}px ${3 * scale}px rgba(0, 0, 0, 0.65)`;
-    wm.style.opacity = String(WATERMARK_OPACITY);
-    const wmHeight = wm.getBoundingClientRect().height;
-    const marginPx = WATERMARK_MARGIN * scale;
-    wm.style.top = `${Math.max(0, bottomLimitPx - marginPx - wmHeight)}px`;
+    const text = state.watermarkEnabled ? state.watermarkText.trim() : "";
+    wm.hidden = !text;
+
+    // Subtitles stack just above the watermark when one's visible (mirrors
+    // the server), otherwise they sit near the bottom of the video/caption
+    // area — expressed as a `bottom` offset so the box's own height (which
+    // varies per line) doesn't need to be known here.
+    let subtitleBottomPx = boxHeight - bottomLimitPx + SUBTITLE_MARGIN * scale;
+
+    if (text) {
+      wm.textContent = text;
+      wm.style.fontSize = `${WATERMARK_FONT_SIZE * scale}px`;
+      wm.style.textShadow = `0 ${scale}px ${3 * scale}px rgba(0, 0, 0, 0.65)`;
+      wm.style.opacity = String(WATERMARK_OPACITY);
+      const wmHeight = wm.getBoundingClientRect().height;
+      const marginPx = WATERMARK_MARGIN * scale;
+      const wmTopPx = Math.max(0, bottomLimitPx - marginPx - wmHeight);
+      wm.style.top = `${wmTopPx}px`;
+      subtitleBottomPx = boxHeight - wmTopPx + 6 * scale;
+    }
+
+    const sub = dom.subtitlePreview;
+    sub.style.bottom = `${Math.max(0, subtitleBottomPx)}px`;
+    sub.style.fontSize = `${SUBTITLE_FONT_SIZE * scale}px`;
+    sub.style.fontWeight = state.subtitlePreset === "yellow" ? "500" : "700";
+    sub.style.padding = `${20 * scale}px ${32 * scale}px`;
+    sub.style.borderRadius = `${18 * scale}px`;
+  }
+
+  function updateSubtitlePreview() {
+    const sub = dom.subtitlePreview;
+    if (!state.subtitlesEnabled || !state.subtitleSegments.length) {
+      sub.hidden = true;
+      return;
+    }
+    const t = dom.previewVideo.currentTime - state.start;
+    const seg = state.subtitleSegments.find((s) => t >= s.start && t < s.end);
+    if (!seg) {
+      sub.hidden = true;
+      return;
+    }
+    sub.hidden = false;
+    sub.textContent = seg.text;
   }
 
   function applyTextStyle(el, scale, { paddingX, paddingY }) {
@@ -572,6 +780,7 @@
       dom.previewVideo.currentTime = state.start;
     }
     updatePlaybackTimeLabel();
+    updateSubtitlePreview();
     if (state.duration) {
       const pct = (dom.previewVideo.currentTime / state.duration) * 100;
       dom.timelinePlayhead.style.left = `${clamp(pct, 0, 100)}%`;
@@ -602,7 +811,7 @@
     dom.exportResult.hidden = true;
     dom.exportBtn.hidden = false;
     dom.exportBtn.disabled = false;
-    dom.exportBtn.textContent = "Export square video";
+    dom.exportBtn.textContent = "Export video";
   }
 
   async function startExport() {
@@ -631,6 +840,7 @@
 
     const payload = {
       video_id: state.videoId,
+      aspect_ratio: state.aspectRatio,
       start: state.start,
       end: state.end,
       text: state.text,
@@ -639,6 +849,10 @@
       align: state.align,
       style: state.style,
       position: state.position,
+      watermark_enabled: state.watermarkEnabled,
+      watermark_text: state.watermarkText,
+      subtitles_enabled: state.subtitlesEnabled,
+      subtitle_preset: state.subtitlePreset,
     };
 
     try {
@@ -711,6 +925,145 @@
     dom.exportProgress.hidden = true;
     dom.exportError.textContent = message;
     dom.exportBtn.disabled = false;
-    dom.exportBtn.textContent = "Export square video";
+    dom.exportBtn.textContent = "Export video";
+  }
+
+  // ---------------------------------------------------------------------
+  // Filter: "Movie Cut" — slices the current [start, end] trim range into
+  // fixed-length clips, renders each with whatever caption/watermark/
+  // subtitle config is currently selected, and zips them into one
+  // download. Reuses the same /api/export/progress + /api/export/download
+  // routes as a regular export (the server just tracks a .zip path there
+  // instead of an .mp4 one).
+  // ---------------------------------------------------------------------
+  dom.filterSelect.addEventListener("change", () => {
+    const choice = dom.filterSelect.value;
+    dom.filterSelect.value = ""; // this select is an action trigger, not a persisted setting
+    if (choice === "movie_cut") openMoviecutModal();
+  });
+
+  function openMoviecutModal() {
+    state.moviecutEpoch += 1; // cancel any in-flight poll from a previous run
+    dom.moviecutModal.hidden = false;
+    dom.moviecutViewConfig.hidden = false;
+    dom.moviecutViewProgress.hidden = true;
+    dom.moviecutViewReady.hidden = true;
+    dom.moviecutError.textContent = "";
+    dom.moviecutDuration.value = "1";
+  }
+
+  function closeMoviecutModal() {
+    state.moviecutEpoch += 1; // cancel any in-flight poll
+    dom.moviecutModal.hidden = true;
+  }
+
+  dom.moviecutNo.addEventListener("click", closeMoviecutModal);
+  dom.moviecutCancel.addEventListener("click", closeMoviecutModal);
+
+  dom.moviecutYes.addEventListener("click", () => {
+    const minutes = parseFloat(dom.moviecutDuration.value);
+    if (!isFinite(minutes) || minutes <= 0) {
+      dom.moviecutError.textContent = "Enter a valid clip duration.";
+      return;
+    }
+    if (state.end - state.start < MIN_CLIP) {
+      dom.moviecutError.textContent = `Clip must be at least ${MIN_CLIP}s long.`;
+      return;
+    }
+    dom.moviecutError.textContent = "";
+    startMoviecut(minutes * 60);
+  });
+
+  async function startMoviecut(clipSeconds) {
+    state.moviecutEpoch += 1;
+    const myEpoch = state.moviecutEpoch;
+
+    dom.moviecutViewConfig.hidden = true;
+    dom.moviecutViewProgress.hidden = false;
+    dom.moviecutProgressFill.style.width = "0%";
+    dom.moviecutProgressLabel.textContent = "Preparing clips…";
+
+    const payload = {
+      video_id: state.videoId,
+      aspect_ratio: state.aspectRatio,
+      start: state.start,
+      end: state.end,
+      clip_duration_seconds: clipSeconds,
+      text: state.text,
+      font_size: state.fontSize,
+      bold: state.bold,
+      align: state.align,
+      style: state.style,
+      position: state.position,
+      watermark_enabled: state.watermarkEnabled,
+      watermark_text: state.watermarkText,
+      subtitles_enabled: state.subtitlesEnabled,
+      subtitle_preset: state.subtitlePreset,
+    };
+
+    try {
+      const res = await fetch("/api/movie-cut", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (myEpoch !== state.moviecutEpoch) return; // superseded while this request was in flight
+      if (!res.ok) {
+        moviecutFailed(myEpoch, data.error || "Could not start the movie cut.");
+        return;
+      }
+      pollMoviecutProgress(myEpoch, data.job_id);
+    } catch (err) {
+      if (myEpoch !== state.moviecutEpoch) return;
+      console.error("[editor] movie cut request failed:", err);
+      moviecutFailed(myEpoch, "Could not reach the server — check your connection and try again.");
+    }
+  }
+
+  async function pollMoviecutProgress(epoch, jobId) {
+    while (epoch === state.moviecutEpoch) {
+      try {
+        const res = await fetch(`/api/export/progress/${jobId}`, { cache: "no-store" });
+        if (epoch !== state.moviecutEpoch) return;
+        const data = await res.json();
+        if (epoch !== state.moviecutEpoch) return;
+        if (!res.ok) {
+          moviecutFailed(epoch, data.error || "Lost track of the movie cut job.");
+          return;
+        }
+
+        const pct = clamp(data.percent || 0, 0, 100);
+        dom.moviecutProgressFill.style.width = `${pct}%`;
+        dom.moviecutProgressLabel.textContent = data.stage || "Processing…";
+
+        if (data.error) {
+          moviecutFailed(epoch, data.error);
+          return;
+        }
+        if (data.done) {
+          moviecutSucceeded(epoch, jobId);
+          return;
+        }
+      } catch (err) {
+        // transient poll hiccup — keep trying on the next tick
+        console.warn("[editor] movie cut progress poll failed, retrying:", err);
+      }
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+
+  function moviecutSucceeded(epoch, jobId) {
+    if (epoch !== state.moviecutEpoch) return; // superseded — ignore
+    dom.moviecutViewProgress.hidden = true;
+    dom.moviecutViewReady.hidden = false;
+    dom.moviecutDownload.href = `/api/export/download/${jobId}`;
+  }
+
+  function moviecutFailed(epoch, message) {
+    if (epoch !== state.moviecutEpoch) return; // superseded — ignore
+    dom.moviecutViewProgress.hidden = true;
+    dom.moviecutViewConfig.hidden = false;
+    dom.moviecutError.textContent = message;
   }
 })();

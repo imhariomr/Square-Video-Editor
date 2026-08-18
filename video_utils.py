@@ -173,20 +173,23 @@ def _even(n):
     return n if n % 2 == 0 else n + 1
 
 
-def build_export_filters(canvas, video_h, video_y, overlays):
+def build_export_filters(canvas_w, canvas_h, video_h, video_y, overlays):
     """Builds the ffmpeg filter_complex graph for: crop/scale the source
     video to fill its target area without distortion (the "cover" idiom),
-    composite it onto a black square canvas, then stack zero or more
-    pre-rendered image layers on top in order (each just a PNG by this
-    point — a caption band/box, a watermark, etc). `overlays` is a list of
-    (x, y) positions; overlay i corresponds to ffmpeg input index i+1 (input
-    0 is always the source video).
+    composite it onto a black canvas, then stack zero or more pre-rendered
+    image layers on top in order (each just a PNG by this point — a caption
+    band/box, a watermark, timed subtitle lines, etc). `overlays` is a list
+    of (x, y, enable) tuples; overlay i corresponds to ffmpeg input index
+    i+1 (input 0 is always the source video). `enable` is either None (the
+    layer is visible for the whole clip) or an ffmpeg timeline expression
+    (e.g. "between(t,1.20,3.40)") so the layer only appears during that
+    window — how subtitle lines are shown only while they're being spoken.
     """
     video_h = _even(video_h)
     parts = [
-        f"[0:v]scale={canvas}:{video_h}:force_original_aspect_ratio=increase,"
-        f"crop={canvas}:{video_h},setsar=1[vid]",
-        f"color=c=black:s={canvas}x{canvas}[bg]",
+        f"[0:v]scale={canvas_w}:{video_h}:force_original_aspect_ratio=increase,"
+        f"crop={canvas_w}:{video_h},setsar=1[vid]",
+        f"color=c=black:s={canvas_w}x{canvas_h}[bg]",
     ]
     if not overlays:
         parts.append(f"[bg][vid]overlay=0:{video_y}[outv]")
@@ -194,33 +197,38 @@ def build_export_filters(canvas, video_h, video_y, overlays):
 
     parts.append(f"[bg][vid]overlay=0:{video_y}[stage0]")
     prev_label = "stage0"
-    for idx, (x, y) in enumerate(overlays):
+    for idx, (x, y, enable) in enumerate(overlays):
         input_idx = idx + 1
         stage_label = "outv" if idx == len(overlays) - 1 else f"stage{idx + 1}"
-        parts.append(f"[{prev_label}][{input_idx}:v]overlay={x}:{y}[{stage_label}]")
+        enable_clause = f":enable='{enable}'" if enable else ""
+        parts.append(f"[{prev_label}][{input_idx}:v]overlay={x}:{y}{enable_clause}[{stage_label}]")
         prev_label = stage_label
     return ";".join(parts)
 
 
-def run_export(input_path, output_path, start, end, video_h, video_y, has_audio, on_progress,
-                overlays=None):
+def run_export(input_path, output_path, start, end, canvas_w, canvas_h, video_h, video_y,
+                has_audio, on_progress, overlays=None):
     """Runs the ffmpeg export as a subprocess, calling on_progress(percent)
     as it reports real encoding progress via -progress pipe:1. Raises
     ExportError with ffmpeg's own message on failure.
 
-    overlays: list of (path, x, y) tuples, layered in order on top of the
-    cropped video (e.g. the caption band/box, then the watermark on top of
-    that). An empty/None list means the square crop is composited with no
-    extra inputs at all, rather than faking invisible overlays.
+    overlays: list of (path, x, y, enable) tuples, layered in order on top of
+    the cropped video (e.g. the caption band/box, then subtitle lines, then
+    the watermark on top of everything). `enable` is None for a layer shown
+    for the whole clip, or an ffmpeg timeline expression to show it only
+    during a time window (subtitle lines). An empty/None list means the crop
+    is composited with no extra inputs at all, rather than faking invisible
+    overlays.
     """
     overlays = overlays or []
     duration = max(0.01, end - start)
-    canvas = 1080
 
-    filter_complex = build_export_filters(canvas, video_h, video_y, [(x, y) for _, x, y in overlays])
+    filter_complex = build_export_filters(
+        canvas_w, canvas_h, video_h, video_y, [(x, y, enable) for _, x, y, enable in overlays]
+    )
 
     cmd = [FFMPEG_PATH, "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", input_path]
-    for path, _, _ in overlays:
+    for path, _, _, _ in overlays:
         cmd += ["-loop", "1", "-i", path]
     cmd += ["-filter_complex", filter_complex, "-map", "[outv]"]
     if has_audio:

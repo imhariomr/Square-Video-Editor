@@ -125,6 +125,52 @@ def render_overlay_image(text, canvas_w, font_size, bold, align, max_width_ratio
     return img, box_w, box_h
 
 
+SUBTITLE_PRESETS = {"none", "yellow"}
+
+
+def render_subtitle_image(text, canvas_w, font_size, preset="none", max_width_ratio=0.86):
+    """Renders one auto-generated subtitle line, styled by preset:
+
+    - "none": the same semi-transparent black box + white text as the
+      manual floating-box caption (reuses render_overlay_image as-is).
+    - "yellow": dark-yellow, not-quite-bold text with a thin black outline
+      directly over the video, no background box — the classic burned-in
+      subtitle look.
+    """
+    if preset == "yellow":
+        return _render_subtitle_outline(text, canvas_w, font_size, max_width_ratio)
+    return render_overlay_image(text, canvas_w, font_size, True, "center", max_width_ratio)
+
+
+def _render_subtitle_outline(text, canvas_w, font_size, max_width_ratio):
+    font = get_font(False, font_size)
+    probe = Image.new("RGBA", (canvas_w, 10))
+    draw = ImageDraw.Draw(probe)
+
+    stroke_w = max(2, font_size // 16)
+    max_text_width = int(canvas_w * max_width_ratio) - 2 * stroke_w
+    lines = wrap_text(text or " ", font, max_text_width, draw)
+
+    line_height = int(font_size * LINE_SPACING)
+    content_w = max(_line_width(draw, line, font) for line in lines) if lines else 0
+    img_w = _even(min(content_w, canvas_w * max_width_ratio) + 4 * stroke_w)
+    img_h = _even(line_height * len(lines) + 2 * stroke_w)
+
+    img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    total_text_h = line_height * len(lines)
+    y = stroke_w + (img_h - 2 * stroke_w - total_text_h) / 2 + (line_height - font_size) / 2
+    for line in lines:
+        w = _line_width(draw, line, font)
+        x = (img_w - w) / 2
+        draw.text((x, y), line, font=font, fill=(196, 156, 0, 255),
+                   stroke_width=stroke_w, stroke_fill=(0, 0, 0, 255))
+        y += line_height
+
+    return img, img_w, img_h
+
+
 def render_watermark_image(text, font_size=26, bold=True, shadow_offset=2, shadow_opacity=170,
                             padding=6, opacity=1.0):
     """Small bold white text with a subtle drop shadow (so it stays legible
