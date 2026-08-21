@@ -61,8 +61,15 @@
     textOverlay: document.querySelector("[data-text-overlay]"),
     watermark: document.querySelector("[data-watermark]"),
     subtitlePreview: document.querySelector("[data-subtitle-preview]"),
+    grainOverlay: document.querySelector("[data-grain-overlay]"),
 
     aspectSelect: document.querySelector("[data-aspect-select]"),
+    videoFilterSelect: document.querySelector("[data-video-filter-select]"),
+    cropZoomSlider: document.querySelector("[data-crop-zoom-slider]"),
+    cropZoomReadout: document.querySelector("[data-crop-zoom-readout]"),
+    cropPad: document.querySelector("[data-crop-pad]"),
+    cropDot: document.querySelector("[data-crop-dot]"),
+    cropReset: document.querySelector("[data-crop-reset]"),
 
     playPauseBtn: document.querySelector("[data-playpause-btn]"),
     restartBtn: document.querySelector("[data-restart-btn]"),
@@ -135,6 +142,10 @@
     hasAudio: false,
 
     aspectRatio: DEFAULT_ASPECT_RATIO,
+    videoFilter: "none",
+    cropX: 0.5,
+    cropY: 0.5,
+    cropZoom: 1.0,
 
     start: 0,
     end: 0,
@@ -224,6 +235,88 @@
   dom.aspectSelect.addEventListener("change", () => {
     state.aspectRatio = dom.aspectSelect.value;
     applyAspectRatio();
+  });
+
+  // Video Filter preset — a CSS approximation of the server's ffmpeg
+  // color/grain preset (grayscale+grain, sepia-ish "vintage", etc). Purely
+  // a style choice, so it never touches trim/caption/subtitle state.
+  const VIDEO_FILTER_CLASSES = ["vf-bw", "vf-vintage", "vf-vivid", "vf-cool"];
+  function applyVideoFilterPreview() {
+    dom.previewVideo.classList.remove(...VIDEO_FILTER_CLASSES);
+    if (state.videoFilter !== "none") dom.previewVideo.classList.add(`vf-${state.videoFilter}`);
+    dom.grainOverlay.hidden = state.videoFilter !== "bw";
+  }
+  dom.videoFilterSelect.addEventListener("change", () => {
+    state.videoFilter = dom.videoFilterSelect.value;
+    applyVideoFilterPreview();
+  });
+
+  // ---------------------------------------------------------------------
+  // Crop: zoom (how much of the source overflow to cut into — a real
+  // crop-size change, not just repositioning) plus a focus point (where
+  // within that overflow the crop window sits once cropped). Applied to
+  // the live preview via the video element's own `object-position` +
+  // `transform: scale()` around that same point — the same 0-1 semantics
+  // ffmpeg's crop offset uses — so the preview is pixel-accurate, not an
+  // approximation.
+  // ---------------------------------------------------------------------
+  function applyCropPreview() {
+    dom.previewVideo.style.objectPosition = `${state.cropX * 100}% ${state.cropY * 100}%`;
+    dom.previewVideo.style.transformOrigin = `${state.cropX * 100}% ${state.cropY * 100}%`;
+    dom.previewVideo.style.transform = state.cropZoom > 1 ? `scale(${state.cropZoom})` : "";
+  }
+
+  function setCropFocus(x, y) {
+    state.cropX = clamp(x, 0, 1);
+    state.cropY = clamp(y, 0, 1);
+    dom.cropDot.style.left = `${state.cropX * 100}%`;
+    dom.cropDot.style.top = `${state.cropY * 100}%`;
+    applyCropPreview();
+  }
+
+  function setCropFocusFromEvent(e) {
+    const rect = dom.cropPad.getBoundingClientRect();
+    setCropFocus((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+  }
+
+  dom.cropPad.addEventListener("pointerdown", (e) => {
+    dom.cropPad.setPointerCapture(e.pointerId);
+    setCropFocusFromEvent(e);
+    const onMove = (ev) => setCropFocusFromEvent(ev);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  });
+
+  // Keyboard support for accessibility, same step pattern as the timeline handles.
+  dom.cropPad.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 0.2 : 0.05;
+    let { cropX: x, cropY: y } = state;
+    if (e.key === "ArrowLeft") x -= step;
+    else if (e.key === "ArrowRight") x += step;
+    else if (e.key === "ArrowUp") y -= step;
+    else if (e.key === "ArrowDown") y += step;
+    else return;
+    e.preventDefault();
+    setCropFocus(x, y);
+  });
+
+  function setCropZoom(percent) {
+    state.cropZoom = clamp(percent, 100, parseFloat(dom.cropZoomSlider.max)) / 100;
+    dom.cropZoomSlider.value = String(state.cropZoom * 100);
+    dom.cropZoomReadout.textContent = `${Math.round(state.cropZoom * 100)}%`;
+    applyCropPreview();
+  }
+  dom.cropZoomSlider.addEventListener("input", () => {
+    setCropZoom(parseFloat(dom.cropZoomSlider.value));
+  });
+
+  dom.cropReset.addEventListener("click", () => {
+    setCropZoom(100);
+    setCropFocus(0.5, 0.5);
   });
 
   function resetEditorInputs() {
@@ -320,6 +413,8 @@
     }`;
 
     resetSubtitlesUI();
+    setCropZoom(100);
+    setCropFocus(0.5, 0.5);
 
     dom.previewVideo.src = `/media/${state.videoId}`;
 
@@ -853,6 +948,10 @@
       watermark_text: state.watermarkText,
       subtitles_enabled: state.subtitlesEnabled,
       subtitle_preset: state.subtitlePreset,
+      video_filter: state.videoFilter,
+      crop_x: state.cropX,
+      crop_y: state.cropY,
+      zoom: state.cropZoom,
     };
 
     try {
@@ -999,6 +1098,10 @@
       watermark_text: state.watermarkText,
       subtitles_enabled: state.subtitlesEnabled,
       subtitle_preset: state.subtitlePreset,
+      video_filter: state.videoFilter,
+      crop_x: state.cropX,
+      crop_y: state.cropY,
+      zoom: state.cropZoom,
     };
 
     try {

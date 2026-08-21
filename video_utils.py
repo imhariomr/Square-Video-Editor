@@ -173,22 +173,59 @@ def _even(n):
     return n if n % 2 == 0 else n + 1
 
 
-def build_export_filters(canvas_w, canvas_h, video_h, video_y, overlays):
+# Video-wide color/grain presets, applied to the source before it's cropped
+# onto the canvas. Each value is a raw ffmpeg filter fragment (empty string
+# for "no filter"); "bw" is the only one required to include grain, added
+# via ffmpeg's native `noise` filter rather than any external asset.
+VIDEO_FILTER_PRESETS = {
+    "none": "",
+    "bw": "hue=s=0,eq=contrast=1.15,noise=alls=18:allf=t+u",
+    "vintage": "curves=preset=vintage",
+    "vivid": "eq=saturation=1.5:contrast=1.12",
+    "cool": "curves=preset=cross_process",
+}
+
+
+def build_export_filters(canvas_w, canvas_h, video_h, video_y, overlays, video_filter="",
+                          crop_x=0.5, crop_y=0.5, zoom=1.0):
     """Builds the ffmpeg filter_complex graph for: crop/scale the source
     video to fill its target area without distortion (the "cover" idiom),
-    composite it onto a black canvas, then stack zero or more pre-rendered
-    image layers on top in order (each just a PNG by this point — a caption
-    band/box, a watermark, timed subtitle lines, etc). `overlays` is a list
-    of (x, y, enable) tuples; overlay i corresponds to ffmpeg input index
-    i+1 (input 0 is always the source video). `enable` is either None (the
-    layer is visible for the whole clip) or an ffmpeg timeline expression
-    (e.g. "between(t,1.20,3.40)") so the layer only appears during that
-    window — how subtitle lines are shown only while they're being spoken.
+    optionally apply a color/grain preset, composite it onto a black
+    canvas, then stack zero or more pre-rendered image layers on top in
+    order (each just a PNG by this point — a caption band/box, a
+    watermark, timed subtitle lines, etc). `overlays` is a list of (x, y,
+    enable) tuples; overlay i corresponds to ffmpeg input index i+1 (input
+    0 is always the source video). `enable` is either None (the layer is
+    visible for the whole clip) or an ffmpeg timeline expression (e.g.
+    "between(t,1.20,3.40)") so the layer only appears during that window —
+    how subtitle lines are shown only while they're being spoken.
+
+    zoom (>= 1.0, default 1.0 = no extra zoom) scales the source beyond the
+    minimum needed to cover the canvas before cropping — a real crop-size
+    change (less of the source ends up visible), not just a repositioning.
+
+    crop_x/crop_y (0.0-1.0, default 0.5 = centered) then choose where within
+    that (possibly zoomed-in) overflow the crop window sits — 0 keeps the
+    left/top edge, 1 keeps the right/bottom edge. Computed as an ffmpeg
+    expression (using the crop filter's own in_w/in_h/out_w/out_h) rather
+    than a precomputed pixel offset, so it always matches ffmpeg's actual
+    scaled size exactly, and matches the live preview's CSS
+    `object-position` (same 0-1, left/top-to-right/bottom semantics) exactly.
     """
     video_h = _even(video_h)
+    crop_x = min(1.0, max(0.0, crop_x))
+    crop_y = min(1.0, max(0.0, crop_y))
+    zoom = max(1.0, zoom)
+    scale_w = _even(canvas_w * zoom)
+    scale_h = _even(video_h * zoom)
+    crop_chain = (
+        f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=increase,"
+        f"crop={canvas_w}:{video_h}:(in_w-out_w)*{crop_x:.4f}:(in_h-out_h)*{crop_y:.4f},setsar=1"
+    )
+    if video_filter:
+        crop_chain += f",{video_filter}"
     parts = [
-        f"[0:v]scale={canvas_w}:{video_h}:force_original_aspect_ratio=increase,"
-        f"crop={canvas_w}:{video_h},setsar=1[vid]",
+        f"[0:v]{crop_chain}[vid]",
         f"color=c=black:s={canvas_w}x{canvas_h}[bg]",
     ]
     if not overlays:
@@ -207,7 +244,7 @@ def build_export_filters(canvas_w, canvas_h, video_h, video_y, overlays):
 
 
 def run_export(input_path, output_path, start, end, canvas_w, canvas_h, video_h, video_y,
-                has_audio, on_progress, overlays=None):
+                has_audio, on_progress, overlays=None, video_filter="", crop_x=0.5, crop_y=0.5, zoom=1.0):
     """Runs the ffmpeg export as a subprocess, calling on_progress(percent)
     as it reports real encoding progress via -progress pipe:1. Raises
     ExportError with ffmpeg's own message on failure.
@@ -219,12 +256,19 @@ def run_export(input_path, output_path, start, end, canvas_w, canvas_h, video_h,
     during a time window (subtitle lines). An empty/None list means the crop
     is composited with no extra inputs at all, rather than faking invisible
     overlays.
+
+    video_filter: a raw ffmpeg filter fragment (e.g. from VIDEO_FILTER_PRESETS)
+    applied to the whole video before it's composited — the color/grain preset.
+
+    crop_x/crop_y/zoom: the crop window's size and position (see
+    build_export_filters).
     """
     overlays = overlays or []
     duration = max(0.01, end - start)
 
     filter_complex = build_export_filters(
-        canvas_w, canvas_h, video_h, video_y, [(x, y, enable) for _, x, y, enable in overlays]
+        canvas_w, canvas_h, video_h, video_y, [(x, y, enable) for _, x, y, enable in overlays], video_filter,
+        crop_x, crop_y, zoom,
     )
 
     cmd = [FFMPEG_PATH, "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", input_path]

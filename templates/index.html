@@ -52,6 +52,7 @@
             <div class="preview-wrap">
               <div class="preview-canvas" data-preview-canvas>
                 <video data-preview-video playsinline preload="metadata"></video>
+                <div class="grain-overlay" data-grain-overlay hidden></div>
                 <div class="text-band" data-text-band hidden></div>
                 <div class="text-overlay-box" data-text-overlay hidden></div>
                 <div class="watermark-badge" data-watermark hidden></div>
@@ -156,6 +157,36 @@
                 {% endfor %}
               </select>
             </label>
+          </div>
+
+          <div class="panel">
+            <h2>Crop</h2>
+            <div class="field-row">
+              <label class="field">
+                <span>Zoom (crop size)</span>
+                <input type="range" min="100" max="{{ (max_crop_zoom * 100) | int }}" step="5" value="100" data-crop-zoom-slider>
+              </label>
+              <span class="font-size-readout" data-crop-zoom-readout>100%</span>
+            </div>
+            <p class="hint hint-neutral">Drag to choose what stays in frame once cropped.</p>
+            <div class="crop-pad" data-crop-pad tabindex="0" role="slider" aria-label="Crop focus point">
+              <div class="crop-pad-dot" data-crop-dot></div>
+            </div>
+            <button type="button" class="btn btn-ghost" data-crop-reset>Reset crop</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Video Filter</h2>
+              <label class="preset-picker">
+                <span>Presets</span>
+                <select data-video-filter-select>
+                  {% for key in video_filter_labels %}
+                  <option value="{{ key }}" {% if key == default_video_filter %}selected{% endif %}>{{ video_filter_labels[key] }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
           </div>
 
           <div class="panel">

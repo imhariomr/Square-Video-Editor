@@ -27,7 +27,7 @@ from flask import (
 
 from video_utils import (
     probe_video, run_export, remux_faststart, VideoProbeError, ExportError,
-    FFMPEG_PATH, FFPROBE_PATH,
+    FFMPEG_PATH, FFPROBE_PATH, VIDEO_FILTER_PRESETS,
 )
 from text_render import (
     render_band_image, render_overlay_image, render_watermark_image, render_subtitle_image,
@@ -54,6 +54,19 @@ ASPECT_RATIOS = {
     "16:9": (1920, 1080),
 }
 DEFAULT_ASPECT_RATIO = "1:1"
+
+# Display labels for the video-wide color/grain presets — keys must match
+# VIDEO_FILTER_PRESETS in video_utils.py. Order here is the dropdown order.
+VIDEO_FILTER_LABELS = {
+    "none": "None",
+    "bw": "Black & White",
+    "vintage": "Vintage",
+    "vivid": "Vivid",
+    "cool": "Cool",
+}
+DEFAULT_VIDEO_FILTER = "none"
+
+MAX_CROP_ZOOM = 3.0
 
 # Optional watermark burned into the export (bottom-center, small bold white
 # text with a subtle shadow) — user opts in and supplies the text; only the
@@ -140,6 +153,9 @@ def index():
         "index.html",
         aspect_ratios=ASPECT_RATIOS,
         default_aspect_ratio=DEFAULT_ASPECT_RATIO,
+        video_filter_labels=VIDEO_FILTER_LABELS,
+        default_video_filter=DEFAULT_VIDEO_FILTER,
+        max_crop_zoom=MAX_CROP_ZOOM,
         max_text_length=MAX_TEXT_LENGTH,
         watermark_max_length=WATERMARK_MAX_LENGTH,
         min_font_size=MIN_FONT_SIZE,
@@ -293,11 +309,28 @@ def _parse_export_config(data, info):
     subtitles_enabled = bool(data.get("subtitles_enabled")) and info["has_audio"]
     subtitle_preset = data.get("subtitle_preset") if data.get("subtitle_preset") in SUBTITLE_PRESETS else "none"
 
+    video_filter_key = data.get("video_filter") if data.get("video_filter") in VIDEO_FILTER_PRESETS else DEFAULT_VIDEO_FILTER
+
+    try:
+        crop_x = float(data.get("crop_x", 0.5))
+        crop_y = float(data.get("crop_y", 0.5))
+    except (TypeError, ValueError):
+        crop_x, crop_y = 0.5, 0.5
+    crop_x = max(0.0, min(1.0, crop_x))
+    crop_y = max(0.0, min(1.0, crop_y))
+
+    try:
+        zoom = float(data.get("zoom", 1.0))
+    except (TypeError, ValueError):
+        zoom = 1.0
+    zoom = max(1.0, min(MAX_CROP_ZOOM, zoom))
+
     return {
         "start": start, "end": end, "text": text, "font_size": font_size, "bold": bold,
         "align": align, "style": style, "position": position, "aspect_ratio": aspect_ratio,
         "watermark_text": watermark_text, "subtitles_enabled": subtitles_enabled,
-        "subtitle_preset": subtitle_preset,
+        "subtitle_preset": subtitle_preset, "video_filter": VIDEO_FILTER_PRESETS[video_filter_key],
+        "crop_x": crop_x, "crop_y": crop_y, "zoom": zoom,
     }, None
 
 
@@ -434,6 +467,8 @@ def _run_export_job(job_id, info, cfg):
             has_audio=info["has_audio"],
             on_progress=on_progress,
             overlays=overlays,
+            video_filter=cfg["video_filter"],
+            crop_x=cfg["crop_x"], crop_y=cfg["crop_y"], zoom=cfg["zoom"],
         )
 
         _set_job(job_id, percent=100, stage="Finalizing…", done=True,
@@ -521,6 +556,8 @@ def _run_moviecut_job(job_id, info, cfg, clip_seconds):
                 has_audio=info["has_audio"],
                 on_progress=on_progress,
                 overlays=overlays,
+                video_filter=cfg["video_filter"],
+                crop_x=cfg["crop_x"], crop_y=cfg["crop_y"], zoom=cfg["zoom"],
             )
             clip_paths.append(clip_path)
 
