@@ -151,8 +151,8 @@
     end: 0,
 
     text: "",
-    fontSize: 44,
-    bold: true,
+    fontSize: 40,
+    bold: false,
     align: "center",
     style: "band", // "band" | "overlay"
     position: "top", // "top" | "center" | "bottom"
